@@ -26,6 +26,11 @@ func NewAuthService(jwtManager manager.JwtManager, jwkManager manager.JwkManager
 }
 
 func (a authService) GenerateJwt(user *model.User, deviceType string) (string, error) {
+	// Set the user ID in the JWK manager if it supports it
+	if setter, ok := a.jwkManager.(interface{ SetUserId(int) }); ok {
+		setter.SetUserId(user.Id)
+	}
+	
 	var userAsMap = user.ToMap()
 	return a.jwtManager.GenerateToken(userAsMap, deviceType)
 }
@@ -49,6 +54,11 @@ func (a authService) VerifyToken(token string) (*model.User, error) {
 	errUnmarshallingData := json.Unmarshal(userDataInBytes, &user)
 	if errUnmarshallingData != nil {
 		return nil, errUnmarshallingData
+	}
+
+	// Set the user ID in the JWK manager if it supports it
+	if setter, ok := a.jwkManager.(interface{ SetUserId(int) }); ok {
+		setter.SetUserId(user.Id)
 	}
 
 	return user, nil

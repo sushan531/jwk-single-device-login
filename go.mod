@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	github.com/lestrrat-go/jwx/v3 v3.0.11
+	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/spf13/cobra v1.10.1
 )
 

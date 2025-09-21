@@ -3,10 +3,12 @@ package manager
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
+	"jwk-single-device-login/internal/database"
 )
 
 type JwkManager interface {
@@ -18,13 +20,86 @@ type JwkManager interface {
 
 type jwkManager struct {
 	jwkSet jwk.Set
+	db     *database.DB
+	userId int
 }
 
 func NewJwkManager() JwkManager {
-	return &jwkManager{}
+	db, err := database.NewDB()
+	if err != nil {
+		// Log the error but continue without database support
+		fmt.Printf("Warning: Failed to initialize database: %v\n", err)
+		return &jwkManager{}
+	}
+	return &jwkManager{db: db}
+}
+
+// SetUserId sets the user ID for the JWK manager
+func (j *jwkManager) SetUserId(userId int) {
+	j.userId = userId
 }
 
 func (j *jwkManager) InitializeJwkSet(keyPrefix string) error {
+	// If we have a database and user ID, try to load from database first
+	if j.db != nil && j.userId > 0 {
+		jwkSetJSON, err := j.db.GetJWKSet(j.userId)
+		if err != nil {
+			return fmt.Errorf("failed to get JWK set from database: %w", err)
+		}
+
+		// If we found a key for this user, use it
+		if jwkSetJSON != "" {
+			set, err := jwk.ParseString(jwkSetJSON)
+			if err == nil {
+				// Check if we already have a key for this device type
+				keyID := fmt.Sprintf("key-%s", keyPrefix)
+				_, found := set.LookupKeyID(keyID)
+				
+				if found {
+					// We already have a key for this device type
+					j.jwkSet = set
+					return nil
+				} else {
+					// We have keys for other device types, but not this one
+					// Add a new key for this device type
+					privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+					if err != nil {
+						return fmt.Errorf("failed to generate private key: %w", err)
+					}
+
+					key, err := jwk.Import(privateKey)
+					if err != nil {
+						return fmt.Errorf("failed to import RSA key into JWK: %w", err)
+					}
+
+					if errSettingKeyId := key.Set(jwk.KeyIDKey, keyID); errSettingKeyId != nil {
+						return fmt.Errorf("failed to set key ID: %w", errSettingKeyId)
+					}
+
+					if errAddingKeyToSet := set.AddKey(key); errAddingKeyToSet != nil {
+						return fmt.Errorf("failed to update key set: %w", err)
+					}
+
+					j.jwkSet = set
+
+					// Save the updated set back to the database
+					updatedJwkSetJSON, err := json.Marshal(set)
+					if err != nil {
+						return fmt.Errorf("failed to marshal JWK set: %w", err)
+					}
+
+					if err := j.db.SaveJWKSet(j.userId, string(updatedJwkSetJSON)); err != nil {
+						return fmt.Errorf("failed to save JWK set to database: %w", err)
+					}
+
+					return nil
+				}
+			}
+			// If parsing fails, continue to generate a new key set
+		}
+	}
+
+	// Generate a new key set
 	set := jwk.NewSet()
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -46,6 +121,19 @@ func (j *jwkManager) InitializeJwkSet(keyPrefix string) error {
 	}
 
 	j.jwkSet = set
+
+	// Save to database if available
+	if j.db != nil && j.userId > 0 {
+		jwkSetJSON, err := json.Marshal(set)
+		if err != nil {
+			return fmt.Errorf("failed to marshal JWK set: %w", err)
+		}
+
+		if err := j.db.SaveJWKSet(j.userId, string(jwkSetJSON)); err != nil {
+			return fmt.Errorf("failed to save JWK set to database: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -54,8 +142,6 @@ func (j *jwkManager) GetAnyPrivateKeyWithKeyId(keyPrefix string) (*rsa.PrivateKe
 		return nil, "", fmt.Errorf("JWK set is empty or not initialized")
 	}
 
-	// you can place your logic to fetch random key
-	// it could be as simple as randomInt from (0 to j.jwkSet.Len() - 1)
 	key, foundKey := j.jwkSet.LookupKeyID(fmt.Sprintf("key-%s", keyPrefix))
 	if !foundKey {
 		return nil, "", fmt.Errorf("key not found in JWK set")
