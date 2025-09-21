@@ -4,13 +4,16 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/spf13/cobra"
-	"jwk-single-device-login/internal/manager"
-	"jwk-single-device-login/model"
-	"jwk-single-device-login/service"
 	"os"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/sushan531/jwkauth/internal/manager"
+	"github.com/sushan531/jwkauth/model"
+	"github.com/sushan531/jwkauth/service"
+	"github.com/sushan531/jwkauth/internal/database"
 )
 
 var menuCmd = &cobra.Command{
@@ -24,8 +27,15 @@ func init() {
 }
 
 func runMenu(cmd *cobra.Command, args []string) {
-	var jwkManager = manager.NewJwkManager()
-	var jwtManager = manager.NewJwtManager(jwkManager)
+	var jwkManager = manager.NewJwkManager(manager.JwkManagerConfig{
+		DBConfig: database.Config{
+			DBPath: "jwk_keys.db",
+		},
+
+	})
+	var jwtManager = manager.NewJwtManager(jwkManager, manager.JwtManagerConfig{
+		TokenExpiration: 2400 * time.Hour,
+	})
 	var authService = service.NewAuthService(jwtManager, jwkManager)
 
 	reader := bufio.NewReader(os.Stdin)

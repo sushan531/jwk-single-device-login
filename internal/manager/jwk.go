@@ -8,30 +8,38 @@ import (
 	"fmt"
 
 	"github.com/lestrrat-go/jwx/v3/jwk"
-	"jwk-single-device-login/internal/database"
+	"github.com/sushan531/jwkauth/internal/database"
 )
+
+// JwkManagerConfig holds configuration for JWK manager
+type JwkManagerConfig struct {
+	DBConfig database.Config
+}
 
 type JwkManager interface {
 	InitializeJwkSet(keyPrefix string) error
 	GetAnyPrivateKeyWithKeyId(keyPrefix string) (*rsa.PrivateKey, string, error)
 	GetPublicKeyBy(keyId string) (*rsa.PublicKey, error)
 	GetPublicKeys() ([]*rsa.PublicKey, error)
+	SetUserId(userId int)
 }
 
 type jwkManager struct {
 	jwkSet jwk.Set
 	db     *database.DB
 	userId int
+	config JwkManagerConfig
 }
 
-func NewJwkManager() JwkManager {
-	db, err := database.NewDB()
+// NewJwkManager creates a new JWK manager with the given configuration
+func NewJwkManager(config JwkManagerConfig) JwkManager {
+	db, err := database.NewDB(config.DBConfig)
 	if err != nil {
 		// Log the error but continue without database support
 		fmt.Printf("Warning: Failed to initialize database: %v\n", err)
-		return &jwkManager{}
+		return &jwkManager{config: config}
 	}
-	return &jwkManager{db: db}
+	return &jwkManager{db: db, config: config}
 }
 
 // SetUserId sets the user ID for the JWK manager
@@ -54,7 +62,7 @@ func (j *jwkManager) InitializeJwkSet(keyPrefix string) error {
 				// Check if we already have a key for this device type
 				keyID := fmt.Sprintf("key-%s", keyPrefix)
 				_, found := set.LookupKeyID(keyID)
-				
+
 				if found {
 					// We already have a key for this device type
 					j.jwkSet = set

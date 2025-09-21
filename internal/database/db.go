@@ -9,19 +9,25 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const (
-	dbName = "jwk_keys.db"
-)
+// Config holds database configuration
+type Config struct {
+	DBPath string
+}
 
 // DB represents a database connection
 type DB struct {
 	*sql.DB
+	config Config
 }
 
-// NewDB creates a new database connection
-func NewDB() (*DB, error) {
+// NewDB creates a new database connection with the given configuration
+func NewDB(config Config) (*DB, error) {
+	if config.DBPath == "" {
+		config.DBPath = "jwk_keys.db" // Default path
+	}
+
 	// Ensure the database directory exists
-	dbDir := filepath.Dir(dbName)
+	dbDir := filepath.Dir(config.DBPath)
 	if dbDir != "." && dbDir != "" {
 		if err := os.MkdirAll(dbDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create database directory: %w", err)
@@ -29,7 +35,7 @@ func NewDB() (*DB, error) {
 	}
 
 	// Open the database
-	db, err := sql.Open("sqlite3", dbName)
+	db, err := sql.Open("sqlite3", config.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -54,7 +60,7 @@ func NewDB() (*DB, error) {
 		return nil, fmt.Errorf("failed to create jwk_keys table: %w", err)
 	}
 
-	return &DB{db}, nil
+	return &DB{DB: db, config: config}, nil
 }
 
 // SaveJWKSet saves a JWK set for a user

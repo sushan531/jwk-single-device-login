@@ -3,8 +3,9 @@ package service
 import (
 	"crypto/rsa"
 	"encoding/json"
-	"jwk-single-device-login/internal/manager"
-	"jwk-single-device-login/model"
+
+	"github.com/sushan531/jwkauth/internal/manager"
+	"github.com/sushan531/jwkauth/model"
 )
 
 type AuthService interface {
@@ -30,7 +31,7 @@ func (a authService) GenerateJwt(user *model.User, deviceType string) (string, e
 	if setter, ok := a.jwkManager.(interface{ SetUserId(int) }); ok {
 		setter.SetUserId(user.Id)
 	}
-	
+
 	var userAsMap = user.ToMap()
 	return a.jwtManager.GenerateToken(userAsMap, deviceType)
 }

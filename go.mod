@@ -1,4 +1,4 @@
-module jwk-single-device-login
+module github.com/sushan531/jwkauth
 
 go 1.25.1
 

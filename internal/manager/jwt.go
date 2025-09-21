@@ -10,6 +10,11 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 )
 
+// JwtManagerConfig holds configuration for JWT manager
+type JwtManagerConfig struct {
+	TokenExpiration time.Duration
+}
+
 type JwtManager interface {
 	GenerateToken(claims map[string]interface{}, keyPrefix string) (string, error)
 	VerifyTokenSignatureAndGetClaims(jwtToken string) (map[string]interface{}, error)
@@ -17,11 +22,18 @@ type JwtManager interface {
 
 type jwtManager struct {
 	jwkManager JwkManager
+	config     JwtManagerConfig
 }
 
-func NewJwtManager(jwkManager JwkManager) JwtManager {
+// NewJwtManager creates a new JWT manager with the given configuration
+func NewJwtManager(jwkManager JwkManager, config JwtManagerConfig) JwtManager {
+	if config.TokenExpiration == 0 {
+		config.TokenExpiration = 2400 * time.Hour // Default expiration
+	}
+	
 	return &jwtManager{
 		jwkManager: jwkManager,
+		config:     config,
 	}
 }
 
@@ -32,7 +44,7 @@ func (j jwtManager) GenerateToken(claims map[string]interface{}, keyPrefix strin
 	var tokenKeys = map[string]interface{}{
 		"claim":           claims,
 		jwt.IssuedAtKey:   currentTime.Unix(),
-		jwt.ExpirationKey: currentTime.Add(24 * time.Hour).Unix(),
+		jwt.ExpirationKey: currentTime.Add(j.config.TokenExpiration).Unix(),
 	}
 
 	for key, value := range tokenKeys {
@@ -41,7 +53,7 @@ func (j jwtManager) GenerateToken(claims map[string]interface{}, keyPrefix strin
 		}
 	}
 	if err := j.jwkManager.InitializeJwkSet(keyPrefix); err != nil {
-		return "", fmt.Errorf("Error initializing jwk set: %w", err)
+		return "", fmt.Errorf("error initializing jwk set: %w", err)
 	}
 
 	privateKey, keyId, err := j.jwkManager.GetAnyPrivateKeyWithKeyId(keyPrefix)

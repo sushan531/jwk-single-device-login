@@ -1,6 +1,6 @@
 package main
 
-import "jwk-single-device-login/cmd"
+import "github.com/sushan531/jwkauth/cmd"
 
 func main() {
 	cmd.Execute()
