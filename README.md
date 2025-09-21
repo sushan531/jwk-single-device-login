@@ -1,16 +1,34 @@
 # JWK Auth
 
-A Go package for JWT authentication using JWK (JSON Web Key) sets with SQLite storage.
+A Go package for JWT authentication using JWK (JSON Web Key) sets with support for both SQLite and PostgreSQL storage.
 
 ## Features
 
 - Generate JWT tokens for users with device-specific keys
 - Verify JWT tokens
-- Store JWK sets in SQLite database
+- Store JWK sets in SQLite or PostgreSQL database
 - Support for multiple devices per user
 - JWKS endpoint support
+- Standalone CLI for testing and management
+- Importable as a package for integration with other projects
 
 ## Installation
+
+### As a CLI Tool
+
+```bash
+# Clone the repository
+git clone https://github.com/sushan531/jwkauth.git
+cd jwkauth
+
+# Build the binary
+go build -o jwkauth
+
+# Install globally (optional)
+go install github.com/sushan531/jwkauth@latest
+```
+
+### As a Package
 
 ```bash
 go get github.com/sushan531/jwkauth
@@ -18,7 +36,32 @@ go get github.com/sushan531/jwkauth
 
 ## Usage
 
-### Basic Usage
+### Standalone CLI
+
+The package includes a command-line interface for JWT operations:
+
+```bash
+# Using SQLite (default)
+jwkauth menu --db-type=sqlite --db-path=jwk_keys.db
+
+# Using PostgreSQL
+jwkauth menu --db-type=postgres --db-conn="postgres://user:password@localhost/dbname?sslmode=disable"
+```
+
+Available commands:
+- `menu` - Interactive menu for JWT operations
+  - Generate tokens
+  - Verify tokens
+  - Get JWKS (public keys)
+
+CLI Options:
+- `--db-type` - Database type (sqlite or postgres)
+- `--db-path` - Path to SQLite database file
+- `--db-conn` - PostgreSQL connection string
+
+### As a Package
+
+#### Basic Usage
 
 ```go
 package main
@@ -32,11 +75,19 @@ import (
 )
 
 func main() {
-	// Create a new JWKAuth instance
+	// Create a new JWKAuth instance with SQLite
 	auth := jwkauth.New(jwkauth.Config{
+		DBType:          "sqlite",
 		DBPath:          "jwk_keys.db",
 		TokenExpiration: 24 * time.Hour,
 	})
+
+	// Or with PostgreSQL
+	// auth := jwkauth.New(jwkauth.Config{
+	//     DBType:          "postgres",
+	//     DBConnStr:       "postgres://user:password@localhost/dbname?sslmode=disable",
+	//     TokenExpiration: 24 * time.Hour,
+	// })
 
 	// Create a user
 	user := &model.User{
@@ -70,7 +121,7 @@ func main() {
 }
 ```
 
-### Integration with a REST API
+#### Integration with a REST API
 
 ```go
 package main
@@ -87,8 +138,9 @@ import (
 var auth jwkauth.JWKAuth
 
 func init() {
-	// Initialize JWKAuth
+	// Initialize JWKAuth with SQLite
 	auth = jwkauth.New(jwkauth.Config{
+		DBType:          "sqlite",
 		DBPath:          "jwk_keys.db",
 		TokenExpiration: 24 * time.Hour,
 	})
@@ -108,19 +160,14 @@ func main() {
 			return
 		}
 
-		// Validate credentials (replace with your own logic)
-		if creds.Username != "john.doe" || creds.Password != "password" {
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-			return
-		}
-
-		// Create user
-		user := &model.User{
-			Id:       123,
-			Username: creds.Username,
-		}
+		// Authenticate user (implement your own logic)
+		// ...
 
 		// Generate token
+		user := &model.User{
+			Id:       123, // Use actual user ID
+			Username: creds.Username,
+		}
 		token, err := auth.GenerateToken(user, creds.Device)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -133,61 +180,72 @@ func main() {
 		})
 	})
 
-	// Protected endpoint
-	http.HandleFunc("/protected", func(w http.ResponseWriter, r *http.Request) {
-		// Get token from Authorization header
-		token := r.Header.Get("Authorization")
-		if token == "" {
-			http.Error(w, "Missing token", http.StatusUnauthorized)
-			return
-		}
-
-		// Remove "Bearer " prefix if present
-		if len(token) > 7 && token[:7] == "Bearer " {
-			token = token[7:]
-		}
-
-		// Verify token
-		user, err := auth.VerifyToken(token)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
-			return
-		}
-
-		// Return user info
-		json.NewEncoder(w).Encode(user)
-	})
-
 	// JWKS endpoint
 	http.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
-		// Get public keys
-		publicKeys, err := auth.GetPublicKeys()
+		keys, err := auth.GetPublicKeys()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		// Convert to JWKS format
-		jwks := map[string]interface{}{
-			"keys": publicKeys,
-		}
-
-		// Return JWKS
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jwks)
+		json.NewEncoder(w).Encode(keys)
 	})
 
-	// Start server
+	// Protected endpoint
+	http.HandleFunc("/protected", func(w http.ResponseWriter, r *http.Request) {
+		// Get token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			return
+		}
+
+		// Extract token from "Bearer <token>"
+		tokenString := authHeader[7:]
+
+		// Verify token
+		user, err := auth.VerifyToken(tokenString)
+		if err != nil {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		// Token is valid, proceed with the request
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Protected resource",
+			"user":    user,
+		})
+	})
+
 	http.ListenAndServe(":8080", nil)
 }
 ```
 
-## Configuration
+## API Reference
 
-The `Config` struct allows you to customize the behavior of the package:
+### JWKAuth Interface
 
-- `DBPath`: Path to the SQLite database file (default: "jwk_keys.db")
-- `TokenExpiration`: Duration until tokens expire (default: 24 hours)
+```go
+type JWKAuth interface {
+	GenerateToken(user *model.User, deviceType string) (string, error)
+	VerifyToken(token string) (*model.User, error)
+	GetPublicKeys() (map[string]interface{}, error)
+}
+```
+
+### Configuration
+
+```go
+type Config struct {
+	// Database configuration
+	DBType    string // "sqlite" or "postgres"
+	DBPath    string // Path to SQLite database file
+	DBConnStr string // PostgreSQL connection string
+	
+	// JWT configuration
+	TokenExpiration time.Duration // Default: 24 hours
+}
+```
 
 ## License
 

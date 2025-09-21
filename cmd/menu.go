@@ -10,10 +10,16 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/sushan531/jwkauth/internal/database"
 	"github.com/sushan531/jwkauth/internal/manager"
 	"github.com/sushan531/jwkauth/model"
 	"github.com/sushan531/jwkauth/service"
-	"github.com/sushan531/jwkauth/internal/database"
+)
+
+var (
+	dbType      string
+	dbPath      string
+	dbConnStr   string
 )
 
 var menuCmd = &cobra.Command{
@@ -24,18 +30,36 @@ var menuCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(menuCmd)
+	
+	// Add flags for database configuration
+	menuCmd.Flags().StringVar(&dbType, "db-type", "sqlite", "Database type (sqlite or postgres)")
+	menuCmd.Flags().StringVar(&dbPath, "db-path", "jwk_keys.db", "Path to SQLite database file")
+	menuCmd.Flags().StringVar(&dbConnStr, "db-conn", "", "PostgreSQL connection string (e.g., postgres://user:password@localhost/dbname?sslmode=disable)")
 }
 
 func runMenu(cmd *cobra.Command, args []string) {
-	var jwkManager = manager.NewJwkManager(manager.JwkManagerConfig{
-		DBConfig: database.Config{
-			DBPath: "jwk_keys.db",
-		},
+	// Configure database based on flags
+	dbConfig := database.Config{
+		DBType:    database.DBType(dbType),
+		DBPath:    dbPath,
+		DBConnStr: dbConnStr,
+	}
+	
+	// Validate configuration
+	if dbConfig.DBType == database.PostgreSQL && dbConfig.DBConnStr == "" {
+		fmt.Println("Error: PostgreSQL connection string is required when using postgres database type")
+		fmt.Println("Example: --db-conn=\"postgres://user:password@localhost/dbname?sslmode=disable\"")
+		return
+	}
 
+	var jwkManager = manager.NewJwkManager(manager.JwkManagerConfig{
+		DBConfig: dbConfig,
 	})
+	
 	var jwtManager = manager.NewJwtManager(jwkManager, manager.JwtManagerConfig{
 		TokenExpiration: 2400 * time.Hour,
 	})
+	
 	var authService = service.NewAuthService(jwtManager, jwkManager)
 
 	reader := bufio.NewReader(os.Stdin)
